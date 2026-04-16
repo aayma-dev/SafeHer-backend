@@ -19,15 +19,6 @@ async def register(
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db)
 ):
-    # Check if username exists
-    result = await db.execute(select(User).where(User.username == user_data.username))
-    existing_user = result.scalar_one_or_none()
-    if existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Username already taken"
-        )
-    
     # Check if email exists
     result = await db.execute(select(User).where(User.email == user_data.email))
     existing_email = result.scalar_one_or_none()
@@ -37,13 +28,30 @@ async def register(
             detail="Email already registered"
         )
     
+    # Generate username from email (before @ symbol)
+    username_base = user_data.email.split('@')[0]
+    # Remove any special characters for username
+    import re
+    username_base = re.sub(r'[^a-zA-Z0-9_]', '', username_base)
+    
+    # Make username unique by adding random suffix if needed
+    username = username_base
+    counter = 1
+    while True:
+        result = await db.execute(select(User).where(User.username == username))
+        existing_username = result.scalar_one_or_none()
+        if not existing_username:
+            break
+        username = f"{username_base}{counter}"
+        counter += 1
+    
     # Create verification token
     verification_token = generate_verification_token()
     
     # Create new user
     hashed_password = get_password_hash(user_data.password)
     new_user = User(
-        username=user_data.username,
+        username=username,
         email=user_data.email,
         hashed_password=hashed_password,
         email_verification_token=verification_token,
@@ -70,25 +78,23 @@ async def login(
     user_data: UserLogin,
     db: AsyncSession = Depends(get_db)
 ):
-    # Find user by username or email
+    # Find user by email only (matching your frontend)
     result = await db.execute(
-        select(User).where(
-            (User.username == user_data.username) | (User.email == user_data.username)
-        )
+        select(User).where(User.email == user_data.email)
     )
     user = result.scalar_one_or_none()
     
     if not user or not verify_password(user_data.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username/email or password",
+            detail="Invalid email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
     
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Account is deactivated"
+            detail="Account is deactivated. Please verify your email."
         )
     
     # Update last login
@@ -96,7 +102,7 @@ async def login(
     await db.commit()
     
     # Create access token
-    token_data = {"sub": str(user.id), "username": user.username, "role": user.role}
+    token_data = {"sub": str(user.id), "email": user.email, "username": user.username, "role": user.role}
     access_token = create_access_token(
         data=token_data,
         expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)

@@ -9,10 +9,10 @@ class User(Base):
     __tablename__ = "users"
     
     id = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    username = Column(String(50), unique=True, nullable=False, index=True)
     email = Column(String(255), unique=True, nullable=False, index=True)
+    username = Column(String(50), unique=True, nullable=False, index=True)  # Auto-generated from email
     hashed_password = Column(String(255), nullable=False)
-    is_active = Column(Boolean, default=False)
+    is_active = Column(Boolean, default=True)
     is_verified = Column(Boolean, default=False)
     email_verification_token = Column(String(255), nullable=True)
     reset_password_token = Column(String(255), nullable=True)

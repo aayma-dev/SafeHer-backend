@@ -11,16 +11,24 @@ app = FastAPI(
     redoc_url="/api/redoc"
 )
 
+# CORS origins for your frontend
+CORS_ORIGINS = [
+    "http://localhost:3000",   # Your React frontend
+    "http://localhost:5173",   # Vite default
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5173",
+]
+
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Include routers
+# Include only auth router (no reports yet)
 app.include_router(auth.router)
 
 @app.get("/")
@@ -31,6 +39,6 @@ async def root():
         "docs": "/api/docs"
     }
 
-@app.get("/health")
-async def health_check():
+@app.get("/api/health")
+async def api_health_check():
     return {"status": "healthy", "service": settings.APP_NAME}

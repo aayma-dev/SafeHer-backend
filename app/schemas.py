@@ -4,17 +4,10 @@ from typing import Optional
 from datetime import datetime
 import re
 
+# Replace the UserCreate class with this (no confirm_password, username removed)
 class UserCreate(BaseModel):
-    username: str = Field(..., min_length=3, max_length=50)
     email: EmailStr
     password: str = Field(..., min_length=8)
-    confirm_password: str
-    
-    @validator('username')
-    def username_alphanumeric(cls, v):
-        if not re.match(r'^[a-zA-Z0-9_]+$', v):
-            raise ValueError('Username must contain only letters, numbers, and underscores')
-        return v
     
     @validator('password')
     def password_strength(cls, v):
@@ -26,18 +19,11 @@ class UserCreate(BaseModel):
             raise ValueError('Password must contain at least one number')
         if not re.search(r'[!@#$%^&*(),.?":{}|<>]', v):
             raise ValueError('Password must contain at least one special character')
-        if len(v) < 8:
-            raise ValueError('Password must be at least 8 characters long')
-        return v
-    
-    @validator('confirm_password')
-    def passwords_match(cls, v, values, **kwargs):
-        if 'password' in values and v != values['password']:
-            raise ValueError('Passwords do not match')
         return v
 
+# Replace the UserLogin class with this (email only)
 class UserLogin(BaseModel):
-    username: str
+    email: EmailStr
     password: str
 
 class UserResponse(BaseModel):
