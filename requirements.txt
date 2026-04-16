@@ -13,3 +13,4 @@ python-dotenv==1.0.0
 bcrypt==4.1.1
 Pillow==10.1.0          # NEW - for image processing
 aiofiles==23.2.1        # NEW - for async file operations
+asyncpg==0.31.0
