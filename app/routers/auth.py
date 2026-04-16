@@ -119,3 +119,14 @@ async def get_current_user_info(
     current_user: User = Depends(get_current_user)
 ):
     return current_user
+@router.options("/login")
+async def options_login():
+    return {"message": "OK"}
+
+@router.options("/register")
+async def options_register():
+    return {"message": "OK"}
+
+@router.options("/me")
+async def options_me():
+    return {"message": "OK"}

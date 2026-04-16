@@ -3,6 +3,9 @@ from pydantic import BaseModel, EmailStr, Field, validator
 from typing import Optional
 from datetime import datetime
 import re
+from typing import Optional, List
+from uuid import UUID
+from enum import Enum
 
 # Replace the UserCreate class with this (no confirm_password, username removed)
 class UserCreate(BaseModel):
@@ -73,3 +76,56 @@ class ResetPassword(BaseModel):
         if 'new_password' in values and v != values['new_password']:
             raise ValueError('Passwords do not match')
         return v
+    
+    # Add these after your existing code (before the last closing bracket if any)
+class ReportCategory(str, Enum):
+    HARASSMENT = "Harassment"
+    STALKING = "Stalking / Following"
+    PHYSICAL_ASSAULT = "Physical Assault"
+    UNSAFE_AREA = "Unsafe Area"
+    VERBAL_ABUSE = "Verbal Abuse"
+    OTHER = "Other"
+
+class ReportStatus(str, Enum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    RESOLVED = "resolved"
+
+class ReportCreate(BaseModel):
+    title: str = Field(..., min_length=3, max_length=200)
+    description: str = Field(..., min_length=20, max_length=2000)
+    category: ReportCategory
+    latitude: Optional[float] = Field(None, ge=-90, le=90)
+    longitude: Optional[float] = Field(None, ge=-180, le=180)
+    address: Optional[str] = Field(None, max_length=500)
+    is_anonymous: bool = True
+
+class ReportUpdate(BaseModel):
+    status: Optional[ReportStatus] = None
+    title: Optional[str] = None
+    description: Optional[str] = None
+
+class ReportResponse(BaseModel):
+    id: UUID
+    title: str
+    description: str
+    category: ReportCategory
+    latitude: Optional[float]
+    longitude: Optional[float]
+    address: Optional[str]
+    status: ReportStatus
+    is_anonymous: bool
+    user_id: Optional[UUID]
+    image_urls: List[str]
+    upvotes: int
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+class ReportListResponse(BaseModel):
+    total: int
+    page: int
+    per_page: int
+    reports: List[ReportResponse]
