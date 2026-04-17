@@ -1,30 +1,32 @@
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy.orm import declarative_base
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, declarative_base
 from app.config import settings
+import os
 
-# Create async engine for PostgreSQL with asyncpg
-engine = create_async_engine(
-    settings.DATABASE_URL,
+# Convert asyncpg URL to standard postgresql for Vercel
+DATABASE_URL = settings.DATABASE_URL
+if "postgresql+asyncpg://" in DATABASE_URL:
+    DATABASE_URL = DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://")
+
+# Create sync engine for PostgreSQL
+engine = create_engine(
+    DATABASE_URL,
     pool_size=10,
     max_overflow=20,
     pool_pre_ping=True,
     echo=settings.DEBUG
 )
 
-# Create async session factory
-AsyncSessionLocal = async_sessionmaker(
-    engine,
-    class_=AsyncSession,
-    expire_on_commit=False
-)
+# Create sync session factory
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 # Base class for models
 Base = declarative_base()
 
-# Dependency to get database session
-async def get_db():
-    async with AsyncSessionLocal() as session:
-        try:
-            yield session
-        finally:
-            await session.close()
+# Dependency to get database session (sync)
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()

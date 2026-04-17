@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request, BackgroundTasks
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 from sqlalchemy import select
 from datetime import datetime, timedelta
 from uuid import UUID
@@ -10,18 +10,18 @@ from app.auth import verify_password, get_password_hash, create_access_token
 from app.utils import generate_verification_token, send_verification_email
 from app.config import settings
 from app.dependencies import get_current_user
+import re
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-async def register(
+def register(
     user_data: UserCreate,
     background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_db)
+    db: Session = Depends(get_db)
 ):
     # Check if email exists
-    result = await db.execute(select(User).where(User.email == user_data.email))
-    existing_email = result.scalar_one_or_none()
+    existing_email = db.query(User).filter(User.email == user_data.email).first()
     if existing_email:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -31,15 +31,13 @@ async def register(
     # Generate username from email (before @ symbol)
     username_base = user_data.email.split('@')[0]
     # Remove any special characters for username
-    import re
     username_base = re.sub(r'[^a-zA-Z0-9_]', '', username_base)
     
     # Make username unique by adding random suffix if needed
     username = username_base
     counter = 1
     while True:
-        result = await db.execute(select(User).where(User.username == username))
-        existing_username = result.scalar_one_or_none()
+        existing_username = db.query(User).filter(User.username == username).first()
         if not existing_username:
             break
         username = f"{username_base}{counter}"
@@ -60,8 +58,8 @@ async def register(
     )
     
     db.add(new_user)
-    await db.commit()
-    await db.refresh(new_user)
+    db.commit()
+    db.refresh(new_user)
     
     # Send verification email in background
     background_tasks.add_task(
@@ -74,15 +72,12 @@ async def register(
     return new_user
 
 @router.post("/login", response_model=Token)
-async def login(
+def login(
     user_data: UserLogin,
-    db: AsyncSession = Depends(get_db)
+    db: Session = Depends(get_db)
 ):
     # Find user by email only (matching your frontend)
-    result = await db.execute(
-        select(User).where(User.email == user_data.email)
-    )
-    user = result.scalar_one_or_none()
+    user = db.query(User).filter(User.email == user_data.email).first()
     
     if not user or not verify_password(user_data.password, user.hashed_password):
         raise HTTPException(
@@ -99,7 +94,7 @@ async def login(
     
     # Update last login
     user.last_login = datetime.utcnow()
-    await db.commit()
+    db.commit()
     
     # Create access token
     token_data = {"sub": str(user.id), "email": user.email, "username": user.username, "role": user.role}
@@ -115,18 +110,19 @@ async def login(
     return {"access_token": access_token, "token_type": "bearer"}
 
 @router.get("/me", response_model=UserResponse)
-async def get_current_user_info(
+def get_current_user_info(
     current_user: User = Depends(get_current_user)
 ):
     return current_user
+
 @router.options("/login")
-async def options_login():
+def options_login():
     return {"message": "OK"}
 
 @router.options("/register")
-async def options_register():
+def options_register():
     return {"message": "OK"}
 
 @router.options("/me")
-async def options_me():
+def options_me():
     return {"message": "OK"}

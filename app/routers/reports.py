@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Form, BackgroundTasks
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, desc, and_
+from sqlalchemy.orm import Session
+from sqlalchemy import func, desc, and_
 from typing import Optional, List
 from uuid import UUID
 from datetime import datetime
@@ -27,7 +27,7 @@ def calculate_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> fl
     return R * c
 
 @router.post("/", response_model=ReportResponse, status_code=status.HTTP_201_CREATED)
-async def create_report(
+def create_report(
     title: str = Form(..., min_length=3, max_length=200),
     description: str = Form(..., min_length=20, max_length=2000),
     category: ReportCategory = Form(...),
@@ -36,7 +36,7 @@ async def create_report(
     address: Optional[str] = Form(None),
     is_anonymous: bool = Form(True),
     current_user: Optional[User] = Depends(get_current_user_optional),
-    db: AsyncSession = Depends(get_db)
+    db: Session = Depends(get_db)
 ):
     """
     Submit a new incident report.
@@ -57,35 +57,28 @@ async def create_report(
     )
     
     db.add(report)
-    await db.commit()
-    await db.refresh(report)
+    db.commit()
+    db.refresh(report)
     
     return report
 
 @router.get("/", response_model=ReportListResponse)
-async def get_reports(
+def get_reports(
     category: Optional[ReportCategory] = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
-    db: AsyncSession = Depends(get_db)
+    db: Session = Depends(get_db)
 ):
     """Get list of approved reports with filters."""
     
-    query = select(Report).where(Report.status == ReportStatus.APPROVED)
+    query = db.query(Report).filter(Report.status == ReportStatus.APPROVED)
     
     if category:
-        query = query.where(Report.category == category)
+        query = query.filter(Report.category == category)
     
-    count_query = select(func.count()).select_from(Report).where(Report.status == ReportStatus.APPROVED)
-    if category:
-        count_query = count_query.where(Report.category == category)
+    total = query.count()
     
-    total_result = await db.execute(count_query)
-    total = total_result.scalar()
-    
-    query = query.order_by(desc(Report.created_at)).offset(skip).limit(limit)
-    result = await db.execute(query)
-    reports = result.scalars().all()
+    reports = query.order_by(desc(Report.created_at)).offset(skip).limit(limit).all()
     
     return ReportListResponse(
         total=total or 0,
@@ -95,9 +88,9 @@ async def get_reports(
     )
 
 @router.get("/my", response_model=List[ReportResponse])
-async def get_my_reports(
+def get_my_reports(
     current_user: User = Depends(get_current_user_optional),
-    db: AsyncSession = Depends(get_db)
+    db: Session = Depends(get_db)
 ):
     """Get reports submitted by the authenticated user."""
     
@@ -107,22 +100,63 @@ async def get_my_reports(
             detail="Authentication required"
         )
     
-    query = select(Report).where(Report.user_id == current_user.id).order_by(desc(Report.created_at))
-    result = await db.execute(query)
-    reports = result.scalars().all()
+    reports = db.query(Report).filter(Report.user_id == current_user.id).order_by(desc(Report.created_at)).all()
     
     return reports
 
+@router.get("/nearby", response_model=ReportListResponse)
+def get_nearby_reports(
+    lat: float = Query(..., ge=-90, le=90),
+    lng: float = Query(..., ge=-180, le=180),
+    radius_km: float = Query(1.0, ge=0.1, le=50),
+    category: Optional[ReportCategory] = Query(None),
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db)
+):
+    """Get reports near a location using bounding box + distance calculation."""
+    
+    # Calculate bounding box
+    lat_delta = radius_km / 111.0
+    lng_delta = radius_km / (111.0 * abs(lat or 1))
+    
+    # Build query with bounding box
+    query = db.query(Report).filter(
+        and_(
+            Report.status == ReportStatus.APPROVED,
+            Report.latitude.between(lat - lat_delta, lat + lat_delta),
+            Report.longitude.between(lng - lng_delta, lng + lng_delta)
+        )
+    )
+    
+    if category:
+        query = query.filter(Report.category == category)
+    
+    reports = query.order_by(desc(Report.created_at)).limit(limit).all()
+    
+    # Filter by exact distance and add distance to response
+    filtered_reports = []
+    for report in reports:
+        if report.latitude and report.longitude:
+            distance = calculate_distance(lat, lng, report.latitude, report.longitude)
+            if distance <= radius_km:
+                report.distance_km = round(distance, 2)
+                filtered_reports.append(report)
+    
+    return ReportListResponse(
+        total=len(filtered_reports),
+        page=1,
+        per_page=limit,
+        reports=filtered_reports
+    )
+
 @router.get("/{report_id}", response_model=ReportResponse)
-async def get_report(
+def get_report(
     report_id: UUID,
-    db: AsyncSession = Depends(get_db)
+    db: Session = Depends(get_db)
 ):
     """Get a single report by ID."""
     
-    query = select(Report).where(Report.id == report_id)
-    result = await db.execute(query)
-    report = result.scalar_one_or_none()
+    report = db.query(Report).filter(Report.id == report_id).first()
     
     if not report:
         raise HTTPException(
@@ -139,17 +173,15 @@ async def get_report(
     return report
 
 @router.patch("/{report_id}/status", response_model=ReportResponse)
-async def update_report_status(
+def update_report_status(
     report_id: UUID,
     status_update: ReportUpdate,
     admin: User = Depends(get_current_admin_user),
-    db: AsyncSession = Depends(get_db)
+    db: Session = Depends(get_db)
 ):
     """Update report status (Admin only)."""
     
-    query = select(Report).where(Report.id == report_id)
-    result = await db.execute(query)
-    report = result.scalar_one_or_none()
+    report = db.query(Report).filter(Report.id == report_id).first()
     
     if not report:
         raise HTTPException(
@@ -161,21 +193,19 @@ async def update_report_status(
         report.status = status_update.status
         report.updated_at = datetime.utcnow()
     
-    await db.commit()
-    await db.refresh(report)
+    db.commit()
+    db.refresh(report)
     
     return report
 
 @router.post("/{report_id}/upvote", response_model=ReportResponse)
-async def upvote_report(
+def upvote_report(
     report_id: UUID,
-    db: AsyncSession = Depends(get_db)
+    db: Session = Depends(get_db)
 ):
     """Upvote a report."""
     
-    query = select(Report).where(Report.id == report_id)
-    result = await db.execute(query)
-    report = result.scalar_one_or_none()
+    report = db.query(Report).filter(Report.id == report_id).first()
     
     if not report:
         raise HTTPException(
@@ -184,7 +214,7 @@ async def upvote_report(
         )
     
     report.upvotes += 1
-    await db.commit()
-    await db.refresh(report)
+    db.commit()
+    db.refresh(report)
     
     return report
